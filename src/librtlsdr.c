@@ -134,6 +134,8 @@ struct rtlsdr_dev {
 int rtlsdr_control_transfer (rtlsdr_dev_t *dev , uint8_t  bmRequestType, uint8_t bRequest, uint16_t wValue, uint16_t wIndex,
                               unsigned char* data, uint16_t wLength, unsigned int  timeout ){
 
+        
+
         if(dev->devfile==0){
                return libusb_control_transfer (dev->devh, bmRequestType, bRequest, wValue, wIndex, data, wLength, timeout);
         }else{
@@ -153,6 +155,13 @@ int rtlsdr_control_transfer (rtlsdr_dev_t *dev , uint8_t  bmRequestType, uint8_t
         }
 }
 
+int rtlsdr_set_timestamp(rtlsdr_dev_t *dev, uint8_t enable)
+{
+        if (!dev || !dev->devfile)
+                return -1;
+
+        return ioctl(dev->devfile, RTLSDR_SETTIMESTAMP, enable);
+}
 
 void rtlsdr_set_gpio_bit(rtlsdr_dev_t *dev, uint8_t gpio, int val);
 static int rtlsdr_set_if_freq(rtlsdr_dev_t *dev, uint32_t freq);
@@ -1487,6 +1496,7 @@ int rtlsdr_open(rtlsdr_dev_t **out_dev, uint32_t index)
                 dev->devfile=0;
         }else{
                 //Skip libusb stuff
+                rtlsdr_set_timestamp(dev, 0);
                 goto devopen;
         }
         
