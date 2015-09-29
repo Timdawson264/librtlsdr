@@ -49,6 +49,7 @@
 #define TWO_POW(n)		((double)(1ULL<<(n)))
 
 #include "rtl-sdr.h"
+#include "rtlsdr.h"
 #include "tuner_e4k.h"
 #include "tuner_fc0012.h"
 #include "tuner_fc0013.h"
@@ -124,7 +125,34 @@ struct rtlsdr_dev {
 	int dev_lost;
 	int driver_active;
 	unsigned int xfer_errors;
+        /* Kernel driver Support */
+        int devfile;
 };
+
+
+/* If Kernel Module in use replaces libusb with ioctl */
+int rtlsdr_control_transfer (rtlsdr_dev_t *dev , uint8_t  bmRequestType, uint8_t bRequest, uint16_t wValue, uint16_t wIndex,
+                              unsigned char* data, uint16_t wLength, unsigned int  timeout ){
+
+        if(dev->devfile==0){
+               return libusb_control_transfer (dev->devh, bmRequestType, bRequest, wValue, wIndex, data, wLength, timeout);
+        }else{
+
+                struct rtlsdr_ctrltransfer crt_trf = {
+                        .bRequestType = bmRequestType,
+                        .bRequest = bRequest,
+                        .wValue = wValue,
+                        .wIndex = wIndex,
+                        .wLength = wLength,
+                        .timeout = timeout,  /* milliseconds */
+                        .data = data,
+                };
+
+                return ioctl(dev->devfile, RTLSDR_CONTROL, &crt_trf);
+
+        }
+}
+
 
 void rtlsdr_set_gpio_bit(rtlsdr_dev_t *dev, uint8_t gpio, int val);
 static int rtlsdr_set_if_freq(rtlsdr_dev_t *dev, uint32_t freq);
@@ -409,7 +437,7 @@ int rtlsdr_read_array(rtlsdr_dev_t *dev, uint8_t block, uint16_t addr, uint8_t *
 	int r;
 	uint16_t index = (block << 8);
 
-	r = libusb_control_transfer(dev->devh, CTRL_IN, 0, addr, index, array, len, CTRL_TIMEOUT);
+	r = rtlsdr_control_transfer(dev, CTRL_IN, 0, addr, index, array, len, CTRL_TIMEOUT);
 #if 0
 	if (r < 0)
 		fprintf(stderr, "%s failed with %d\n", __FUNCTION__, r);
@@ -422,7 +450,7 @@ int rtlsdr_write_array(rtlsdr_dev_t *dev, uint8_t block, uint16_t addr, uint8_t 
 	int r;
 	uint16_t index = (block << 8) | 0x10;
 
-	r = libusb_control_transfer(dev->devh, CTRL_OUT, 0, addr, index, array, len, CTRL_TIMEOUT);
+	r = rtlsdr_control_transfer(dev, CTRL_OUT, 0, addr, index, array, len, CTRL_TIMEOUT);
 #if 0
 	if (r < 0)
 		fprintf(stderr, "%s failed with %d\n", __FUNCTION__, r);
@@ -478,7 +506,7 @@ uint16_t rtlsdr_read_reg(rtlsdr_dev_t *dev, uint8_t block, uint16_t addr, uint8_
 	uint16_t index = (block << 8);
 	uint16_t reg;
 
-	r = libusb_control_transfer(dev->devh, CTRL_IN, 0, addr, index, data, len, CTRL_TIMEOUT);
+	r = rtlsdr_control_transfer(dev, CTRL_IN, 0, addr, index, data, len, CTRL_TIMEOUT);
 
 	if (r < 0)
 		fprintf(stderr, "%s failed with %d\n", __FUNCTION__, r);
@@ -502,7 +530,7 @@ int rtlsdr_write_reg(rtlsdr_dev_t *dev, uint8_t block, uint16_t addr, uint16_t v
 
 	data[1] = val & 0xff;
 
-	r = libusb_control_transfer(dev->devh, CTRL_OUT, 0, addr, index, data, len, CTRL_TIMEOUT);
+	r = rtlsdr_control_transfer(dev, CTRL_OUT, 0, addr, index, data, len, CTRL_TIMEOUT);
 
 	if (r < 0)
 		fprintf(stderr, "%s failed with %d\n", __FUNCTION__, r);
@@ -519,7 +547,7 @@ uint16_t rtlsdr_demod_read_reg(rtlsdr_dev_t *dev, uint8_t page, uint16_t addr, u
 	uint16_t reg;
 	addr = (addr << 8) | 0x20;
 
-	r = libusb_control_transfer(dev->devh, CTRL_IN, 0, addr, index, data, len, CTRL_TIMEOUT);
+	r = rtlsdr_control_transfer(dev, CTRL_IN, 0, addr, index, data, len, CTRL_TIMEOUT);
 
 	if (r < 0)
 		fprintf(stderr, "%s failed with %d\n", __FUNCTION__, r);
@@ -543,7 +571,7 @@ int rtlsdr_demod_write_reg(rtlsdr_dev_t *dev, uint8_t page, uint16_t addr, uint1
 
 	data[1] = val & 0xff;
 
-	r = libusb_control_transfer(dev->devh, CTRL_OUT, 0, addr, index, data, len, CTRL_TIMEOUT);
+	r = rtlsdr_control_transfer(dev, CTRL_OUT, 0, addr, index, data, len, CTRL_TIMEOUT);
 
 	if (r < 0)
 		fprintf(stderr, "%s failed with %d\n", __FUNCTION__, r);
@@ -1439,6 +1467,7 @@ int rtlsdr_open(rtlsdr_dev_t **out_dev, uint32_t index)
 	struct libusb_device_descriptor dd;
 	uint8_t reg;
 	ssize_t cnt;
+        char devstr[1024];
 
 	dev = malloc(sizeof(rtlsdr_dev_t));
 	if (NULL == dev)
@@ -1447,6 +1476,20 @@ int rtlsdr_open(rtlsdr_dev_t **out_dev, uint32_t index)
 	memset(dev, 0, sizeof(rtlsdr_dev_t));
 	memcpy(dev->fir, fir_default, sizeof(fir_default));
 
+        //Open Timing driver
+        //Check if device with index exsists
+        sprintf(devstr, "/dev/rtlsdr%u", index);
+        fprintf(stderr,"OPEN DEV: %s\n",devstr);
+
+        dev->devfile = open(devstr, O_RDWR); //try open
+        if(dev->devfile==-1){
+                fprintf(stderr,"%s, does not exsists\n",devstr);
+                dev->devfile=0;
+        }else{
+                //Skip libusb stuff
+                goto devopen;
+        }
+        
 	libusb_init(&dev->ctx);
 
 	dev->dev_lost = 1;
@@ -1510,6 +1553,8 @@ int rtlsdr_open(rtlsdr_dev_t **out_dev, uint32_t index)
 		fprintf(stderr, "usb_claim_interface error %d\n", r);
 		goto err;
 	}
+/* Skip to after all the libusb stuff */
+devopen:
 
 	dev->rtl_xtal = DEF_RTL_XTAL_FREQ;
 
@@ -1642,7 +1687,8 @@ int rtlsdr_close(rtlsdr_dev_t *dev)
 		rtlsdr_deinit_baseband(dev);
 	}
 
-	libusb_release_interface(dev->devh, 0);
+        if(dev->devh)
+                libusb_release_interface(dev->devh, 0);
 
 #ifdef DETACH_KERNEL_DRIVER
 	if (dev->driver_active) {
@@ -1652,11 +1698,10 @@ int rtlsdr_close(rtlsdr_dev_t *dev)
 			fprintf(stderr, "Reattaching kernel driver failed!\n");
 	}
 #endif
-
-	libusb_close(dev->devh);
-
-	libusb_exit(dev->ctx);
-
+        if(dev->devh){
+                libusb_close(dev->devh);
+                libusb_exit(dev->ctx);
+        }
 	free(dev);
 
 	return 0;
@@ -1677,8 +1722,17 @@ int rtlsdr_read_sync(rtlsdr_dev_t *dev, void *buf, int len, int *n_read)
 {
 	if (!dev)
 		return -1;
-
-	return libusb_bulk_transfer(dev->devh, 0x81, buf, len, n_read, BULK_TIMEOUT);
+                
+        if(dev->devfile){
+                *n_read = read(dev->devfile, buf, len);
+                if(*n_read < 0){
+                        printf( "read error %d: %s\n", *n_read, strerror(errno) );
+                        *n_read = 0;
+                }
+                return 0;
+        }else{
+                return libusb_bulk_transfer(dev->devh, 0x81, buf, len, n_read, BULK_TIMEOUT);
+        }
 }
 
 static void LIBUSB_CALL _libusb_callback(struct libusb_transfer *xfer)
