@@ -1835,6 +1835,31 @@ static int _rtlsdr_free_async_buffers(rtlsdr_dev_t *dev)
 	return 0;
 }
 
+int rtlsdr_read_async_kern(rtlsdr_dev_t *dev, rtlsdr_read_async_cb_t cb, void *ctx,
+			  uint32_t buf_num, uint32_t buf_len)
+{
+        int readsize;
+        size_t bufnum=0;
+        
+        while (RTLSDR_RUNNING == dev->async_status && !dev->async_cancel) {
+                readsize = read(dev->devfile, dev->xfer_buf[bufnum], dev->xfer_buf_len);
+
+                if(readsize < 0){
+                        fprintf(stderr, "read error %d: %s\n", readsize, strerror(errno) );
+                        dev->async_status=RTLSDR_INACTIVE;
+                }else{
+                        //fprintf(stderr, "read %d, %lu\n", readsize, bufnum);
+                        dev->cb(dev->xfer_buf[bufnum], readsize, dev->cb_ctx);
+                }
+                bufnum++;
+                bufnum%=dev->xfer_buf_num; //loop
+        }
+
+        _rtlsdr_free_async_buffers(dev);
+        dev->async_status=RTLSDR_INACTIVE;
+        return 0;
+}
+
 int rtlsdr_read_async(rtlsdr_dev_t *dev, rtlsdr_read_async_cb_t cb, void *ctx,
 			  uint32_t buf_num, uint32_t buf_len)
 {
@@ -1866,7 +1891,13 @@ int rtlsdr_read_async(rtlsdr_dev_t *dev, rtlsdr_read_async_cb_t cb, void *ctx,
 	else
 		dev->xfer_buf_len = DEFAULT_BUF_LENGTH;
 
+        //dev->xfer_buf_len=512;
+        //dev->xfer_buf_num = 1;
 	_rtlsdr_alloc_async_buffers(dev);
+
+        if(dev->devfile){
+                return rtlsdr_read_async_kern( dev, cb, ctx, buf_num, buf_len);
+        }
 
 	for(i = 0; i < dev->xfer_buf_num; ++i) {
 		libusb_fill_bulk_transfer(dev->xfer[i],
