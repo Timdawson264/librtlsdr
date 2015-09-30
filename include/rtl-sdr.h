@@ -380,6 +380,17 @@ RTLSDR_API int rtlsdr_read_async(rtlsdr_dev_t *dev,
  */
 RTLSDR_API int rtlsdr_cancel_async(rtlsdr_dev_t *dev);
 
+/*!
+ * Enables and Disables USB time stamping in kernel module
+ * Timestamps are at the start of every 512 bytes is a struct timespec
+ * 
+ * \param dev the device handle given by rtlsdr_open()
+ * \param 0 to disable, 1 to enable
+ * 
+ * \return 0 on success
+ */
+RTLSDR_API int rtlsdr_set_timestamp(rtlsdr_dev_t *dev, uint8_t enable);
+
 #ifdef __cplusplus
 }
 #endif
