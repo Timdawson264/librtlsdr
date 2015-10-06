@@ -111,6 +111,12 @@ static void underrun_test(unsigned char *buf, uint32_t len, int mute)
 	uint32_t i, lost = 0;
 	static uint8_t bcnt, uninit = 1;
 
+        /*
+        for( i=0; i <len; i++)
+                printf("%u ",buf[i]);
+        printf("\n");
+        */
+        
 	if (uninit) {
 		bcnt = buf[0];
 		uninit = 0;
@@ -118,7 +124,8 @@ static void underrun_test(unsigned char *buf, uint32_t len, int mute)
 	for (i = 0; i < len; i++) {
 		if(bcnt != buf[i]) {
 			lost += (buf[i] > bcnt) ? (buf[i] - bcnt) : (bcnt - buf[i]);
-			bcnt = buf[i];
+                        printf("lost: %d, at: %u. %u!=%u\n",(buf[i]-bcnt), i, bcnt,buf[i]);
+                        bcnt = buf[i];
 		}
 
 		bcnt++;

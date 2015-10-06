@@ -1496,10 +1496,12 @@ int rtlsdr_open(rtlsdr_dev_t **out_dev, uint32_t index)
                 dev->devfile=0;
         }else{
                 //Skip libusb stuff
+                fprintf(stderr, "Using Kernel Driver\n"); 
                 rtlsdr_set_timestamp(dev, 0);
                 goto devopen;
         }
-        
+
+        fprintf(stderr, "Using libUSB\n"); 
 	libusb_init(&dev->ctx);
 
 	dev->dev_lost = 1;
@@ -1736,8 +1738,9 @@ int rtlsdr_read_sync(rtlsdr_dev_t *dev, void *buf, int len, int *n_read)
         if(dev->devfile){
                 *n_read = read(dev->devfile, buf, len);
                 if(*n_read < 0){
-                        printf( "read error %d: %s\n", *n_read, strerror(errno) );
+                        fprintf(stderr, "read error %d: %s\n", *n_read, strerror(errno) );
                         *n_read = 0;
+                        return 1;
                 }
                 return 0;
         }else{
